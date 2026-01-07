@@ -369,8 +369,8 @@ const App: React.FC = () => {
             <Settings2 className="text-black w-6 h-6" />
           </div>
           <div>
-            <h1 className="font-bold text-lg tracking-tight">VOCAL BOOTH</h1>
-            <p className="text-xs text-gray-500">EXAM SESSION</p>
+            <h1 className="font-bold text-lg tracking-tight">SIMULATION</h1>
+            <p className="text-xs text-gray-500">PRONUNCIATION EXAM</p>
           </div>
         </div>
 
@@ -427,11 +427,13 @@ const App: React.FC = () => {
               textContent={
                 <p>
                   "Betty Botter bought some butter,<br/>
-                  but she said 'This butter's bitter.'<br/>
+                  but she said, 'This butter's bitter.'<br/>
                   'If I put it in my batter,<br/>
                   it will make my batter bitter.'<br/>
-                  So she bought some better butter,<br/>
-                  better than bitter butter."
+                  But a bit of better butter<br/>
+                  will make my batter better.'<br/>
+                  So, it was better:<br/>
+                  Betty Botter bought a bit of better butter."
                 </p>
               }
               mediaStream={mediaStream}
@@ -460,7 +462,17 @@ const App: React.FC = () => {
               title="Phonetic Transcription (American IPA)"
               textContent={
                 <p className="font-mono text-amber-200">
-                  /ðə ˈnɔrθ ˌwɪnd ən ðə ˈsʌn wər dɪsˈpjutɪŋ ˈwɪtʃ wəz ðə ˈstrɔŋɡər, wɛn ə ˈtrævələr keɪm əˈlɔŋ ˈræpt ɪn ə ˈwɔrm ˈkloʊk./
+                  aɪ juzd tu θɪŋk prəˌnʌnsiˈeɪʃən ˈdɪdənt ˈrɪli ˈmætər, bʌt aɪ wʌz rɔŋ.  
+                  wɛn aɪ ˈstɑrtɪd ˈpeɪɪŋ əˈtɛnʃən tu haʊ wɜrdz kəˈnɛkt ænd haʊ saʊndz ɡɛt rɪˈdust, ˈɛvriˌθɪŋ ʧeɪnʤd.  
+                  ɪt ˈwʌzənt əˈbaʊt ˈtɔkɪŋ ˈfæstər; ɪt wʌz əˈbaʊt ˈsaʊndɪŋ ˈklɪrər ænd mɔr ˈkɑnfədənt.  
+
+                  æt fɜrst, aɪ fɛlt ˈstupɪd rɪˈpitɪŋ ðə seɪm ˈsɛntəns əˈgɛn ænd əˈgɛn, bʌt aɪ kɛpt æt ɪt.  
+                  aɪd ˈlɪsən, pɔz, rɪˈpit, ænd ðɛn du ɪt wʌn mɔr taɪm.  
+                  ˈlɪtəl baɪ ˈlɪtəl, aɪ ˈnoʊtəst aɪ ˈwʌzənt ˈgɛsɪŋ ˌɛniˈmɔr; aɪ ˈækʃəli nu wʌt aɪ wʌz ˈseɪɪŋ.  
+
+                  ɪf ju doʊnt kwɪt, jur ˈɡoʊɪŋ tu hɪr ðə ˈdɪfrəns.  
+                  wʌn deɪ, jul ˈriəˌlaɪz jʊr nɑt ʤʌst ˈspikɪŋ ˈɪŋɡlɪʃ; jur ˈθɪŋkɪŋ ɪn ɪt.  
+                  ænd wɛn ðæt ˈhæpənz, ɔl ði ˈɛfərt tɜrnz aʊt tu bi wɜrθ.
                 </p>
               }
               mediaStream={mediaStream}
@@ -489,7 +501,17 @@ const App: React.FC = () => {
               title="Original Text Reading"
               textContent={
                 <p>
-                  "The North Wind and the Sun were disputing which was the stronger, when a traveler came along wrapped in a warm cloak."
+                  I used to think pronunciation didn't really matter, but I was wrong.<br/>
+                  When I started paying attention to how words connect and how sounds get reduced, everything changed.<br/>
+                  It wasn't about talking faster. It was about sounding clearer and more confident.<br/><br/>
+
+                  At first, I felt stupid repeating the same sentence again and again, but I kept at it.<br/>
+                  I'd listen, pause, repeat, and then do it one more time.<br/>
+                  Little by little, I noticed I wasn't guessing anymore. I actually knew what I was saying.<br/><br/>
+
+                  If you don't quit, you're going to hear the difference.<br/>
+                  One day, you'll realize you're not just speaking English. You're thinking in it.<br/>
+                  And when that happens, all effort turns out to be worth it.
                 </p>
               }
               mediaStream={mediaStream}
