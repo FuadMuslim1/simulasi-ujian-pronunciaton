@@ -1,0 +1,8 @@
+{
+  "name": "VocalBooth Exam Studio",
+  "description": "Professional pronunciation examination platform with studio-grade recording interface.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
