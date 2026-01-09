@@ -272,9 +272,19 @@ const Dashboard = forwardRef<{
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      console.log('🧹 Dashboard: Cleaning up on unmount');
       if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current.getTracks().forEach(track => {
+          console.log(`🛑 Stopping track: ${track.kind} (${track.label})`);
+          track.stop();
+          track.enabled = false;
+        });
         streamRef.current = null;
+      }
+      
+      // Also clear video element source
+      if (videoPreviewRef.current) {
+        videoPreviewRef.current.srcObject = null;
       }
     };
   }, []);
@@ -414,7 +424,7 @@ const Dashboard = forwardRef<{
 
         {/* Device Check Section */}
         <div className="lg:w-1/2 flex flex-col">
-          <div className="relative bg-black rounded-xl overflow-hidden border border-gray-800 shadow-xl flex-grow min-h-[300px] flex flex-col">
+          <div className="relative bg-black rounded-xl overflow-hidden border border-gray-800 shadow-xl flex-grow min-h-[200px] flex flex-col">
             
             {/* Video Area */}
             <div className="relative flex-grow bg-black">
@@ -434,7 +444,7 @@ const Dashboard = forwardRef<{
 
               {/* Status Indicators Overlay */}
               {streamRef.current && (
-                <div className="absolute top-4 left-4 flex flex-col gap-2 z-20">
+                <div className="absolute top-4 left-4 flex flex-col gap-2 z-10">
                   <div className={`px-3 py-1.5 rounded-md text-xs font-bold border flex items-center gap-2 transition-colors ${videoEnabled ? 'bg-green-900/30 border-green-500 text-green-400' : 'bg-red-900/30 border-red-500 text-red-400'}`}>
                     {videoEnabled ? <Camera className="w-3 h-3" /> : <VideoOff className="w-3 h-3" />}
                     {videoEnabled ? 'CAMERA ON' : 'CAMERA OFF'}
@@ -448,7 +458,7 @@ const Dashboard = forwardRef<{
 
               {/* Error Overlay for specific issues */}
               {streamRef.current && (!videoEnabled || !audioEnabled) && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-sm z-10 p-4 pointer-events-none">
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-sm z-0 p-4 pointer-events-none">
                    {/* Messages are handled by the status bars below mostly, but this adds emphasis */}
                    <div className="flex flex-col gap-2">
                      {!videoEnabled && <div className="bg-red-900/80 px-4 py-2 rounded text-red-200 font-bold flex items-center gap-2 animate-pulse"><VideoOff className="w-5 h-5" /> CAMERA OFF</div>}

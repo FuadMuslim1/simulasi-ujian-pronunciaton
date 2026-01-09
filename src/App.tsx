@@ -5,7 +5,7 @@ import SessionRecorder from './components/SessionRecorder';
 import BreakScreen from './components/BreakScreen';
 import Completion from './components/Completion';
 import { AppStep, Recording, User } from './types';
-import { Lock, Unlock, Settings2 } from 'lucide-react';
+import { Lock, Unlock, Settings2, Menu, X } from 'lucide-react';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -16,12 +16,49 @@ const App: React.FC = () => {
   const [videoEnabled, setVideoEnabled] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const dashboardRef = React.useRef<{ 
     reloadDevices: () => void;
     toggleVideo: () => void;
     toggleAudio: () => void;
     getMediaStream: () => MediaStream | null;
   }>(null);
+
+  // Stop media stream when completion is reached (but keep recordings)
+  useEffect(() => {
+    if (currentStep === AppStep.COMPLETION) {
+      console.log("🔄 App: Completion reached, stopping media streams only");
+      
+      // Stop all streams but keep recordings intact
+      const stopAllStreams = (stream: MediaStream | null) => {
+        if (stream) {
+          console.log("🔄 App: Stopping stream with tracks:", stream.getTracks().length);
+          stream.getTracks().forEach(track => {
+            console.log(`🔄 App: Stopping ${track.kind} track:`, track.label);
+            track.stop();
+          });
+        }
+      };
+      
+      // Stop current app stream
+      stopAllStreams(mediaStream);
+      
+      // Stop dashboard stream
+      if (dashboardRef.current) {
+        const dashboardStream = dashboardRef.current.getMediaStream();
+        stopAllStreams(dashboardStream);
+      }
+      
+      // Clear stream state only (keep recordings!)
+      setMediaStream(null);
+      setVideoReady(false);
+      setAudioReady(false);
+      setVideoEnabled(false);
+      setAudioEnabled(false);
+      
+      console.log("🔄 App: Media streams stopped, recordings preserved for download");
+    }
+  }, [currentStep]);
 
   // Load recordings from localStorage on mount
   useEffect(() => {
@@ -148,6 +185,36 @@ const App: React.FC = () => {
     setUser(null);
     setCurrentStep(AppStep.LOGIN);
     
+    // Aggressively stop ALL possible streams
+    const stopAllStreams = (stream: MediaStream | null) => {
+      if (stream) {
+        stream.getTracks().forEach(track => {
+          track.stop();
+          track.enabled = false;
+        });
+      }
+    };
+    
+    // Stop current app stream
+    stopAllStreams(mediaStream);
+    
+    // Stop dashboard stream
+    if (dashboardRef.current) {
+      const dashboardStream = dashboardRef.current.getMediaStream();
+      stopAllStreams(dashboardStream);
+    }
+    
+    // Force stop ALL media streams by getting new stream and immediately stopping it
+    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      .then(stream => {
+        stream.getTracks().forEach(track => track.stop());
+        console.log('🔄 Force-stopped any remaining streams');
+      })
+      .catch(() => {
+        // No streams to stop, which is good
+        console.log('✅ No additional streams found');
+      });
+    
     // Reset device states on logout
     setVideoReady(false);
     setAudioReady(false);
@@ -160,6 +227,18 @@ const App: React.FC = () => {
     localStorage.removeItem('vocalBoothUser');
     localStorage.removeItem('vocalBoothCurrentSession');
     localStorage.removeItem('vocalBoothRecordings');
+    
+    // Force garbage collection to clean up stream references
+    if (window.gc) {
+      window.gc();
+    }
+    
+    // Additional: Force page reload after a short delay to ensure browser indicators update
+    setTimeout(() => {
+      window.location.reload();
+    }, 1000);
+    
+    console.log('🔴 App: User logged out, all streams stopped aggressively');
   };
 
   const handleStartExam = () => {
@@ -327,33 +406,66 @@ const App: React.FC = () => {
   }, [currentStep]);
 
   // Sidebar Logic
-  const getSidebarItemClass = (step: AppStep, itemStep: AppStep, itemNumber: number) => {
-    // Basic logic to determine if active, completed, or locked
-    // This is simplified mapping
-    const order = [
-      AppStep.DASHBOARD, 
-      AppStep.SESSION_1, AppStep.BREAK_1, 
-      AppStep.SESSION_2, AppStep.BREAK_2, 
-      AppStep.SESSION_3, AppStep.COMPLETION
-    ];
+  const getSidebarItemClass = (currentStep: AppStep, sessionNumber: number) => {
+    const sessionStep = sessionNumber === 1 ? AppStep.SESSION_1 : sessionNumber === 2 ? AppStep.SESSION_2 : AppStep.SESSION_3;
+    const breakStep = sessionNumber === 1 ? AppStep.BREAK_1 : sessionNumber === 2 ? AppStep.BREAK_2 : AppStep.COMPLETION;
     
-    const currentIndex = order.indexOf(step);
+    const isCurrentSession = currentStep === sessionStep;
+    const isCurrentBreak = currentStep === breakStep;
+    const isCompleted = recordings.find(r => r.sessionId === sessionNumber) || currentStep === breakStep;
     
-    // Determine the "Session" index in the array
-    let targetIndex = -1;
-    if (itemNumber === 1) targetIndex = order.indexOf(AppStep.SESSION_1);
-    if (itemNumber === 2) targetIndex = order.indexOf(AppStep.SESSION_2);
-    if (itemNumber === 3) targetIndex = order.indexOf(AppStep.SESSION_3);
-
-    const isCurrent = step === (itemNumber === 1 ? AppStep.SESSION_1 : itemNumber === 2 ? AppStep.SESSION_2 : AppStep.SESSION_3);
-    const isCompleted = currentIndex > targetIndex;
-    const isLocked = currentIndex < targetIndex;
+    const order = [AppStep.DASHBOARD, AppStep.SESSION_1, AppStep.BREAK_1, AppStep.SESSION_2, AppStep.BREAK_2, AppStep.SESSION_3, AppStep.COMPLETION];
+    const currentIndex = order.indexOf(currentStep);
+    const sessionIndex = order.indexOf(sessionStep);
+    const isLocked = currentIndex < sessionIndex && !isCompleted;
 
     let baseClass = "flex items-center justify-between p-4 rounded-lg border transition-all ";
     
-    if (isCurrent) return baseClass + "bg-amber-600 border-amber-500 text-black font-bold shadow-lg scale-105";
+    if (isCurrentSession) return baseClass + "bg-amber-600 border-amber-500 text-black font-bold shadow-lg scale-105";
+    if (isCurrentBreak) return baseClass + "bg-blue-900/30 border-blue-500/50 text-blue-400";
     if (isCompleted) return baseClass + "bg-green-900/30 border-green-500/50 text-green-400";
+    if (isLocked) return baseClass + "bg-gray-900 border-gray-800 text-gray-600 opacity-60";
     return baseClass + "bg-gray-900 border-gray-800 text-gray-600 opacity-60";
+  };
+
+  const getSessionStatus = (sessionNumber: number) => {
+    const sessionStep = sessionNumber === 1 ? AppStep.SESSION_1 : sessionNumber === 2 ? AppStep.SESSION_2 : AppStep.SESSION_3;
+    const breakStep = sessionNumber === 1 ? AppStep.BREAK_1 : sessionNumber === 2 ? AppStep.BREAK_2 : AppStep.COMPLETION;
+    
+    const isCurrentSession = currentStep === sessionStep;
+    const isCurrentBreak = currentStep === breakStep;
+    const isCompleted = recordings.find(r => r.sessionId === sessionNumber) || currentStep === breakStep;
+    
+    const order = [AppStep.DASHBOARD, AppStep.SESSION_1, AppStep.BREAK_1, AppStep.SESSION_2, AppStep.BREAK_2, AppStep.SESSION_3, AppStep.COMPLETION];
+    const currentIndex = order.indexOf(currentStep);
+    const sessionIndex = order.indexOf(sessionStep);
+    const isLocked = currentIndex < sessionIndex && !isCompleted;
+
+    if (isCurrentSession) return { 
+      icon: <Unlock className="w-4 h-4" />, 
+      status: 'active',
+      numberClass: 'w-8 h-8 rounded-full bg-amber-600 border-2 border-amber-400 flex items-center justify-center text-sm font-bold text-black shadow-lg'
+    };
+    if (isCurrentBreak) return { 
+      icon: <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>, 
+      status: 'break',
+      numberClass: 'w-8 h-8 rounded-full bg-blue-900/30 border-2 border-blue-500 flex items-center justify-center text-sm font-bold text-blue-400'
+    };
+    if (isCompleted) return { 
+      icon: <div className="w-2 h-2 rounded-full bg-green-500"></div>, 
+      status: 'completed',
+      numberClass: 'w-8 h-8 rounded-full bg-green-900/30 border-2 border-green-500 flex items-center justify-center text-sm font-bold text-green-400'
+    };
+    if (isLocked) return { 
+      icon: <Lock className="w-4 h-4" />, 
+      status: 'locked',
+      numberClass: 'w-8 h-8 rounded-full bg-gray-800 border-2 border-gray-700 flex items-center justify-center text-sm font-bold text-gray-500'
+    };
+    return { 
+      icon: <Lock className="w-4 h-4" />, 
+      status: 'locked',
+      numberClass: 'w-8 h-8 rounded-full bg-gray-800 border-2 border-gray-700 flex items-center justify-center text-sm font-bold text-gray-500'
+    };
   };
 
   if (currentStep === AppStep.LOGIN) {
@@ -363,29 +475,55 @@ const App: React.FC = () => {
   return (
     <div className="flex h-screen bg-neutral-950 text-white overflow-hidden font-sans selection:bg-amber-500 selection:text-black">
       {/* Sidebar */}
-      <div className="w-80 bg-black border-r border-gray-800 flex-col p-6 hidden md:flex z-20 shadow-2xl">
-        <div className="mb-10 flex items-center gap-3">
-          <div className="w-10 h-10 bg-gradient-to-br from-amber-500 to-amber-700 rounded-lg flex items-center justify-center">
-            <Settings2 className="text-black w-6 h-6" />
+      <div className={`w-80 bg-black border-r border-gray-800 flex flex-col p-6 z-20 shadow-2xl fixed md:relative h-full transform transition-transform duration-300 ease-in-out ${
+        sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+      }`}>
+        <div className="mb-10 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-gradient-to-br from-amber-500 to-amber-700 rounded-lg flex items-center justify-center">
+              <Settings2 className="text-black w-6 h-6" />
+            </div>
+            <div>
+              <h1 className="font-bold text-lg tracking-tight">PRONUNCIATION</h1>
+              <p className="text-xs text-gray-500">The Examination of Pronunciation</p>
+            </div>
           </div>
-          <div>
-            <h1 className="font-bold text-lg tracking-tight">SIMULATION</h1>
-            <p className="text-xs text-gray-500">PRONUNCIATION EXAM</p>
-          </div>
+          {/* Close button for mobile */}
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="md:hidden text-gray-400 hover:text-white transition-colors"
+          >
+            <X className="w-6 h-6" />
+          </button>
         </div>
 
         <div className="space-y-4">
-          <div className={getSidebarItemClass(currentStep, AppStep.SESSION_1, 1)}>
-            <span>Session 01</span>
-            {currentStep === AppStep.SESSION_1 ? <Unlock className="w-4 h-4" /> : currentStep === AppStep.BREAK_1 || recordings.find(r => r.sessionId === 1) ? <div className="w-2 h-2 rounded-full bg-green-500"></div> : <Lock className="w-4 h-4" />}
+          <div className={getSidebarItemClass(currentStep, 1)}>
+            <div className="flex items-center gap-3">
+              <div className={getSessionStatus(1).numberClass}>
+                1
+              </div>
+              <span>Session 01</span>
+            </div>
+            {getSessionStatus(1).icon}
           </div>
-          <div className={getSidebarItemClass(currentStep, AppStep.SESSION_2, 2)}>
-            <span>Session 02</span>
-            {currentStep === AppStep.SESSION_2 ? <Unlock className="w-4 h-4" /> : currentStep === AppStep.BREAK_2 || recordings.find(r => r.sessionId === 2) ? <div className="w-2 h-2 rounded-full bg-green-500"></div> : <Lock className="w-4 h-4" />}
+          <div className={getSidebarItemClass(currentStep, 2)}>
+            <div className="flex items-center gap-3">
+              <div className={getSessionStatus(2).numberClass}>
+                2
+              </div>
+              <span>Session 02</span>
+            </div>
+            {getSessionStatus(2).icon}
           </div>
-          <div className={getSidebarItemClass(currentStep, AppStep.SESSION_3, 3)}>
-            <span>Session 03</span>
-            {currentStep === AppStep.SESSION_3 ? <Unlock className="w-4 h-4" /> : currentStep === AppStep.COMPLETION || recordings.find(r => r.sessionId === 3) ? <div className="w-2 h-2 rounded-full bg-green-500"></div> : <Lock className="w-4 h-4" />}
+          <div className={getSidebarItemClass(currentStep, 3)}>
+            <div className="flex items-center gap-3">
+              <div className={getSessionStatus(3).numberClass}>
+                3
+              </div>
+              <span>Session 03</span>
+            </div>
+            {getSessionStatus(3).icon}
           </div>
         </div>
 
@@ -401,11 +539,27 @@ const App: React.FC = () => {
         </div>
       </div>
 
+      {/* Overlay for mobile */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 z-10 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* Main Content */}
       <main className="flex-1 p-4 md:p-8 relative overflow-y-auto">
         {/* Mobile Header (visible only on small screens) */}
         <div className="md:hidden flex justify-between items-center mb-6">
-          <span className="font-bold text-amber-500">VOCAL BOOTH</span>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="text-gray-400 hover:text-white transition-colors"
+            >
+              <Menu className="w-6 h-6" />
+            </button>
+            <span className="font-bold text-amber-500">The Examination of Pronunciation</span>
+          </div>
           <div className="text-xs bg-gray-800 px-2 py-1 rounded">{currentStep.replace('_', ' ')}</div>
         </div>
 
@@ -462,17 +616,16 @@ const App: React.FC = () => {
               title="Phonetic Transcription (American IPA)"
               textContent={
                 <p className="font-mono text-amber-200">
-                  aɪ juzd tu θɪŋk prəˌnʌnsiˈeɪʃən ˈdɪdənt ˈrɪli ˈmætər, bʌt aɪ wʌz rɔŋ.  
-                  wɛn aɪ ˈstɑrtɪd ˈpeɪɪŋ əˈtɛnʃən tu haʊ wɜrdz kəˈnɛkt ænd haʊ saʊndz ɡɛt rɪˈdust, ˈɛvriˌθɪŋ ʧeɪnʤd.  
-                  ɪt ˈwʌzənt əˈbaʊt ˈtɔkɪŋ ˈfæstər; ɪt wʌz əˈbaʊt ˈsaʊndɪŋ ˈklɪrər ænd mɔr ˈkɑnfədənt.  
+                  aɪ ˈstɑrtɪd ˈlɜrnɪŋ ˈɪŋɡlɪʃ jərz əˈɡoʊ, ænd aɪ ˈstrʌɡəld æt fɜrst.<br/>
+                  aɪ ˈpræktɪst ˈɛvri deɪ, rɪˈpitɪd ˈdɪfəkəlt ˈsɛntənsɪz, ænd kəˈrɛktɪd maɪ mɪsˈteɪks.<br/>
+                  æt taɪmz, aɪ ˈdaʊtɪd ˌmaɪˈsɛlf, bʌt aɪ riˈmaɪndɪd ˌmaɪˈsɛlf waɪ aɪ ˈstɑrtɪd.<br/><br/>
 
-                  æt fɜrst, aɪ fɛlt ˈstupɪd rɪˈpitɪŋ ðə seɪm ˈsɛntəns əˈgɛn ænd əˈgɛn, bʌt aɪ kɛpt æt ɪt.  
-                  aɪd ˈlɪsən, pɔz, rɪˈpit, ænd ðɛn du ɪt wʌn mɔr taɪm.  
-                  ˈlɪtəl baɪ ˈlɪtəl, aɪ ˈnoʊtəst aɪ ˈwʌzənt ˈgɛsɪŋ ˌɛniˈmɔr; aɪ ˈækʃəli nu wʌt aɪ wʌz ˈseɪɪŋ.  
+                  aɪ ˈnoʊtəst ˈprɑˌɡrɛs ˈæftər aɪ wɜrkt hɑrd ænd steɪd ˈfoʊkəst.<br/>
+                  ði ˈɛfərt aɪ ɪnˈvɛstɪd rɪˈwɔrdɪd mi wɪð ˈkɑnfədəns ænd skɪl.<br/>
+                  ˈivɪn wɛn aɪ fɛlt ˈtaɪərd ɔr ˈfrʌˌstreɪtəd, aɪ riˈmaɪndɪd ˌmaɪˈsɛlf ðæt ˈlɜrnɪŋ ɪz ə ˈprɑˌsɛs, ænd ˈɛvri stɛp ˈmætərd.<br/><br/>
 
-                  ɪf ju doʊnt kwɪt, jur ˈɡoʊɪŋ tu hɪr ðə ˈdɪfrəns.  
-                  wʌn deɪ, jul ˈriəˌlaɪz jʊr nɑt ʤʌst ˈspikɪŋ ˈɪŋɡlɪʃ; jur ˈθɪŋkɪŋ ɪn ɪt.  
-                  ænd wɛn ðæt ˈhæpənz, ɔl ði ˈɛfərt tɜrnz aʊt tu bi wɜrθ.
+                  aɪ ˈfɪnɪʃt ˈlɛsənz aɪ θɔt aɪ ˈkʊdənt, ˈsɛləˌbreɪtɪd smɔl wɪnz, ænd ʃɛrd wɑt aɪ lɜrnd wɪð ˈʌðərz.<br/>
+                  baɪ ˈsteɪɪŋ ˈdɪsəplənd ænd ˈmoʊtəˌveɪtəd, aɪ dɪˈskʌvərd ðæt θɪŋz aɪ wʌns faʊnd hɑrd ˈdɪdənt fil hɑrd ˌɛniˈmɔr.
                 </p>
               }
               mediaStream={mediaStream}
@@ -501,17 +654,16 @@ const App: React.FC = () => {
               title="Original Text Reading"
               textContent={
                 <p>
-                  I used to think pronunciation didn't really matter, but I was wrong.<br/>
-                  When I started paying attention to how words connect and how sounds get reduced, everything changed.<br/>
-                  It wasn't about talking faster. It was about sounding clearer and more confident.<br/><br/>
+                  I started learning English years ago, and I struggled at first.<br/>
+                  I practiced every day, repeated difficult sentences, and corrected my mistakes.<br/>
+                  At times, I doubted myself, but I reminded myself why I started.<br/><br/>
 
-                  At first, I felt stupid repeating the same sentence again and again, but I kept at it.<br/>
-                  I'd listen, pause, repeat, and then do it one more time.<br/>
-                  Little by little, I noticed I wasn't guessing anymore. I actually knew what I was saying.<br/><br/>
+                  I noticed progress after I worked hard and stayed focused.<br/>
+                  The effort I invested rewarded me with confidence and skill.<br/>
+                  Even when I felt tired or frustrated, I reminded myself that learning is a process, and every step mattered.<br/><br/>
 
-                  If you don't quit, you're going to hear the difference.<br/>
-                  One day, you'll realize you're not just speaking English. You're thinking in it.<br/>
-                  And when that happens, all effort turns out to be worth it.
+                  I finished lessons I thought I couldn't, celebrated small wins, and shared what I learned with others.<br/>
+                  By staying disciplined and motivated, I discovered that things I once found hard didn't feel hard anymore.
                 </p>
               }
               mediaStream={mediaStream}

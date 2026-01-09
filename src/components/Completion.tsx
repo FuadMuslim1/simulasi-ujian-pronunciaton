@@ -15,7 +15,7 @@ const Completion: React.FC<CompletionProps> = ({ user, recordings }) => {
           <CheckCircle className="w-10 h-10 text-green-500" />
         </div>
         <h1 className="text-4xl font-bold mb-2">Congratulations, {user.fullName}!</h1>
-        <p className="text-gray-400">You have successfully completed the Vocal Booth Examination.</p>
+        <p className="text-gray-400">You have successfully completed The Examination of Pronunciation.</p>
       </div>
 
       <div className="grid md:grid-cols-2 gap-8 flex-grow">

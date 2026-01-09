@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Mic2, Music4, Eye, EyeOff } from 'lucide-react';
+import { Music4, Eye, EyeOff } from 'lucide-react';
 import { authenticateUser } from '../firebaseService';
 
 interface LoginProps {
@@ -44,11 +44,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
       <div className="relative z-10 w-full max-w-md bg-black/60 backdrop-blur-xl border border-white/10 rounded-2xl shadow-2xl p-8">
         <div className="flex flex-col items-center mb-8">
-          <div className="w-16 h-16 bg-gradient-to-br from-amber-500 to-amber-700 rounded-full flex items-center justify-center shadow-lg mb-4">
-            <Mic2 className="w-8 h-8 text-black" />
-          </div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">VOCAL BOOTH</h1>
-          <p className="text-gray-400 text-sm mt-2 uppercase tracking-widest">Examination Portal</p>
+          <h1 className="text-3xl font-bold text-white tracking-tight text-center uppercase">PRONUNCIATION<br /><span className="text-xl">(THE EXAMINATION)</span></h1>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
