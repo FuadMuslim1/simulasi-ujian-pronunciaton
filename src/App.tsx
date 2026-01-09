@@ -17,6 +17,18 @@ const App: React.FC = () => {
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isProduction, setIsProduction] = useState(false);
+
+  // Check if we're in production
+  useEffect(() => {
+    setIsProduction(window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
+    console.log("🌍 Environment:", {
+      hostname: window.location.hostname,
+      isProduction: window.location.hostname !== 'localhost',
+      protocol: window.location.protocol,
+      userAgent: navigator.userAgent
+    });
+  }, []);
   const dashboardRef = React.useRef<{ 
     reloadDevices: () => void;
     toggleVideo: () => void;
@@ -82,23 +94,31 @@ const App: React.FC = () => {
 
   // Save recordings to localStorage whenever they change
   useEffect(() => {
-    if (recordings.length > 0) {
-      const recordingsToSave = recordings.map(rec => ({
-        sessionId: rec.sessionId,
-        url: rec.url,
-        filename: rec.filename,
-        blobData: Array.from(new Uint8Array(rec.blob)) // Convert blob to array for storage
-      }));
-      localStorage.setItem('vocalBoothRecordings', JSON.stringify(recordingsToSave));
-      console.log('🔄 App: Saved recordings to localStorage:', recordingsToSave.length);
+    try {
+      if (recordings.length > 0) {
+        const recordingsToSave = recordings.map(rec => ({
+          sessionId: rec.sessionId,
+          sessionNumber: rec.sessionNumber,
+          timestamp: rec.timestamp,
+          url: rec.url,
+          filename: rec.filename,
+          blobData: Array.from(new Uint8Array(rec.blob)) // Convert blob to array for storage
+        }));
+        localStorage.setItem('vocalBoothRecordings', JSON.stringify(recordingsToSave));
+        console.log('🔄 App: Saved recordings to localStorage:', recordingsToSave.length);
+      }
+    } catch (error) {
+      console.error('❌ App: Failed to save recordings to localStorage:', error);
+      // Fallback: show error to user
+      alert('Failed to save recordings. Your browser may be in private mode or storage is full.');
     }
   }, [recordings]);
 
   // Check for existing login and session state on mount
   useEffect(() => {
-    const savedUser = localStorage.getItem('vocalBoothUser');
-    if (savedUser) {
-      try {
+    try {
+      const savedUser = localStorage.getItem('vocalBoothUser');
+      if (savedUser) {
         const parsedUser = JSON.parse(savedUser);
         setUser(parsedUser);
         
@@ -136,19 +156,12 @@ const App: React.FC = () => {
             } else {
               setCurrentStep(AppStep.DASHBOARD);
             }
-          } else {
-            // If was in session, go to break screen
-            if (sessionData.sessionNumber === 1) {
-              setCurrentStep(AppStep.BREAK_1);
-            } else if (sessionData.sessionNumber === 2) {
-              setCurrentStep(AppStep.BREAK_2);
-            } else if (sessionData.sessionNumber === 3) {
-              setCurrentStep(AppStep.COMPLETION);
-            } else {
-              setCurrentStep(AppStep.DASHBOARD);
-            }
+          } else if (sessionData.sessionNumber) {
+            // If was in a session, redirect to dashboard first
+            setCurrentStep(AppStep.DASHBOARD);
           }
         } else {
+          // No saved session, go to dashboard
           setCurrentStep(AppStep.DASHBOARD);
         }
         
@@ -157,12 +170,13 @@ const App: React.FC = () => {
         setAudioReady(false);
         setVideoEnabled(false);
         setAudioEnabled(false);
-      } catch (error) {
-        console.error('Error parsing saved data:', error);
-        localStorage.removeItem('vocalBoothUser');
-        localStorage.removeItem('vocalBoothCurrentSession');
-        setCurrentStep(AppStep.DASHBOARD);
       }
+    } catch (error) {
+      console.error('❌ App: Error loading from localStorage:', error);
+      // Clear corrupted data
+      localStorage.removeItem('vocalBoothUser');
+      localStorage.removeItem('vocalBoothRecordings');
+      localStorage.removeItem('vocalBoothCurrentSession');
     }
   }, []);
 

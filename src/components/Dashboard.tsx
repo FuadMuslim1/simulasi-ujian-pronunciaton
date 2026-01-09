@@ -198,10 +198,22 @@ const Dashboard = forwardRef<{
     }
   }, [videoReady, audioReady, videoEnabled, audioEnabled, onDeviceStatusUpdate]);
 
-  // AUTO-START DEVICES ON MOUNT (Immediately after login)
+  // Check for existing login and session state on mount
   useEffect(() => {
-    enableDevices();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    try {
+      // Check if we're in HTTPS (required for media devices)
+      if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+        console.error('❌ Dashboard: HTTPS required for media devices in production');
+        setPermissionError('Camera and microphone access requires HTTPS. Please use a secure connection.');
+        return;
+      }
+
+      // Auto-start devices on mount
+      enableDevices();
+    } catch (error) {
+      console.error('❌ Dashboard: Error initializing devices:', error);
+      setPermissionError('Failed to initialize camera and microphone. Please refresh the page.');
+    }
   }, []);
 
   // Effect to attach listeners and poll status
