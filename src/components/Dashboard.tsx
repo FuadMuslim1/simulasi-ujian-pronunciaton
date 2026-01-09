@@ -200,20 +200,9 @@ const Dashboard = forwardRef<{
 
   // Check for existing login and session state on mount
   useEffect(() => {
-    try {
-      // Check if we're in HTTPS (required for media devices)
-      if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
-        console.error('❌ Dashboard: HTTPS required for media devices in production');
-        setPermissionError('Camera and microphone access requires HTTPS. Please use a secure connection.');
-        return;
-      }
-
-      // Auto-start devices on mount
-      enableDevices();
-    } catch (error) {
-      console.error('❌ Dashboard: Error initializing devices:', error);
-      setPermissionError('Failed to initialize camera and microphone. Please refresh the page.');
-    }
+    console.log("🎥 Dashboard: Component mounted, waiting for user interaction...");
+    // Don't auto-start devices in production - wait for user interaction
+    // enableDevices(); // Removed auto-start
   }, []);
 
   // Effect to attach listeners and poll status
@@ -485,10 +474,17 @@ const Dashboard = forwardRef<{
               
               {!streamRef.current ? (
                 <div className="text-center">
-                  <p className="text-gray-400 text-sm mb-3">Initializing devices...</p>
+                  <p className="text-gray-400 text-sm mb-3">Click below to enable camera and microphone</p>
                   {permissionError && (
                     <p className="text-red-500 mt-2 text-xs">Permission denied. Check browser settings.</p>
                   )}
+                  <button
+                    onClick={enableDevices}
+                    className="mt-3 w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-lg transition-all flex items-center justify-center gap-2 mx-auto"
+                  >
+                    <Camera className="w-4 h-4" />
+                    Enable Camera & Microphone
+                  </button>
                 </div>
               ) : (
                 <div className="flex justify-between items-center">

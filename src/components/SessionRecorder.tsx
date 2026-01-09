@@ -387,6 +387,13 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({
               } 
             };
 
+            // Add error handling for MediaRecorder
+            recorder.onerror = (event: any) => {
+              console.error("🔍 Debug: MediaRecorder error:", event);
+              setError("Recording error occurred. Please restart session.");
+              // Don't auto-restart during recording - let user handle it
+            };
+
             mediaRecorderRef.current = recorder;
             recorder.start();
             console.log("🔍 Debug: recorder.start() called");
@@ -397,6 +404,36 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({
             
             // Start timer immediately after recording starts
             startTimer();
+
+            // Simple monitoring - log only, no actions during recording
+            const logStreamStatus = () => {
+              if (streamRef.current && mediaRecorderRef.current?.state === 'recording') {
+                const tracks = streamRef.current.getTracks();
+                console.log("🔍 Debug: Stream status check:", {
+                  active: streamRef.current.active,
+                  trackCount: tracks.length,
+                  trackStates: tracks.map(t => ({ 
+                    kind: t.kind, 
+                    enabled: t.enabled, 
+                    state: t.readyState 
+                  }))
+                });
+              }
+            };
+
+            // Log status every 10 seconds - non-intrusive
+            const statusLogInterval = setInterval(logStreamStatus, 10000);
+            
+            // Clear logging when recording stops
+            recorder.onstop = () => {
+              clearInterval(statusLogInterval);
+              console.log("🔍 Debug: MediaRecorder stopped");
+              if (isExpectedToEnd.current) {
+                 const blob = new Blob(chunksRef.current, { type: 'video/webm' });
+                 onComplete(blob);
+              } 
+            };
+
           });
 
         } else {
