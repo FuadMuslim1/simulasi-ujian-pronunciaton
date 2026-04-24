@@ -16,9 +16,12 @@ export enum AppStep {
 
 export interface Recording {
   sessionId: number;
+  sessionNumber?: number; // Optional for backward compatibility
+  timestamp?: number; // Optional for backward compatibility
   blob: Blob;
   url: string;
   filename: string;
 }
 
 export const SESSION_DURATION = 60; // seconds
+
