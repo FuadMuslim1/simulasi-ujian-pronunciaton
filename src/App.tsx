@@ -1,11 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Login from './components/Login';
 import Dashboard from './components/Dashboard';
 import SessionRecorder from './components/SessionRecorder';
 import BreakScreen from './components/BreakScreen';
 import Completion from './components/Completion';
 import { AppStep, Recording, User } from './types';
-import { Lock, Unlock, Settings2, Menu, X } from 'lucide-react';
+import { Settings2, Menu, X, Lock, Unlock } from 'lucide-react';
+import { StreamManager } from './utils/StreamManager';
+import { StorageManager } from './utils/StorageManager';
+import { indexedDBManager } from './utils/IndexedDBManager';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -13,21 +16,13 @@ const App: React.FC = () => {
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [videoReady, setVideoReady] = useState(false);
   const [audioReady, setAudioReady] = useState(false);
-  const [videoEnabled, setVideoEnabled] = useState(false);
-  const [audioEnabled, setAudioEnabled] = useState(false);
   const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [isProduction, setIsProduction] = useState(false);
 
   // Check if we're in production
   useEffect(() => {
-    setIsProduction(window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1');
-    console.log("🌍 Environment:", {
-      hostname: window.location.hostname,
-      isProduction: window.location.hostname !== 'localhost',
-      protocol: window.location.protocol,
-      userAgent: navigator.userAgent
-    });
+    const isProduction = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+    
   }, []);
   const dashboardRef = React.useRef<{ 
     reloadDevices: () => void;
@@ -36,82 +31,81 @@ const App: React.FC = () => {
     getMediaStream: () => MediaStream | null;
   }>(null);
 
+  // Helper function to stop all streams
+  const stopAllStreams = useCallback((stream: MediaStream | null) => {
+    StreamManager.stopAllStreams(stream);
+  }, []);
+
   // Stop media stream when completion is reached (but keep recordings)
   useEffect(() => {
     if (currentStep === AppStep.COMPLETION) {
-      console.log("🔄 App: Completion reached, stopping media streams only");
-      
-      // Stop all streams but keep recordings intact
-      const stopAllStreams = (stream: MediaStream | null) => {
-        if (stream) {
-          console.log("🔄 App: Stopping stream with tracks:", stream.getTracks().length);
-          stream.getTracks().forEach(track => {
-            console.log(`🔄 App: Stopping ${track.kind} track:`, track.label);
-            track.stop();
-          });
-        }
-      };
-      
+
+
       // Stop current app stream
       stopAllStreams(mediaStream);
-      
+
       // Stop dashboard stream
       if (dashboardRef.current) {
         const dashboardStream = dashboardRef.current.getMediaStream();
         stopAllStreams(dashboardStream);
       }
-      
+
       // Clear stream state only (keep recordings!)
       setMediaStream(null);
       setVideoReady(false);
       setAudioReady(false);
-      setVideoEnabled(false);
-      setAudioEnabled(false);
-      
-      console.log("🔄 App: Media streams stopped, recordings preserved for download");
-    }
-  }, [currentStep]);
 
-  // Load recordings from localStorage on mount
-  useEffect(() => {
-    const savedRecordings = localStorage.getItem('vocalBoothRecordings');
-    if (savedRecordings) {
-      try {
-        const parsedRecordings = JSON.parse(savedRecordings);
-        // Recreate Blob objects from stored data
-        const restoredRecordings = parsedRecordings.map((rec: any) => ({
-          ...rec,
-          blob: new Blob([rec.blobData], { type: 'video/webm' })
-        }));
-        setRecordings(restoredRecordings);
-        console.log('🔄 App: Loaded recordings from localStorage:', restoredRecordings.length);
-      } catch (error) {
-        console.error('Error loading recordings:', error);
-        localStorage.removeItem('vocalBoothRecordings');
-      }
+
     }
+  }, [currentStep, mediaStream]);
+
+  // Load recordings from IndexedDB on mount
+  useEffect(() => {
+    const loadRecordings = async () => {
+      try {
+        await indexedDBManager.init();
+        const savedRecordings = await indexedDBManager.getAllRecordings();
+        
+        if (savedRecordings && savedRecordings.length > 0) {
+          // Recreate URLs for blobs
+          const restoredRecordings = savedRecordings.map(rec => ({
+            ...rec,
+            url: URL.createObjectURL(rec.blob)
+          }));
+          setRecordings(restoredRecordings);
+
+          
+          // Log storage usage
+          await indexedDBManager.getStorageEstimate();
+        }
+      } catch (error) {
+        console.error('❌ App: Error loading recordings from IndexedDB:', error);
+      }
+    };
+    
+    loadRecordings();
   }, []);
 
-  // Save recordings to localStorage whenever they change
+  // Save recordings to IndexedDB whenever they change
   useEffect(() => {
-    try {
+    const saveRecordings = async () => {
       if (recordings.length > 0) {
-        const recordingsToSave = recordings.map(rec => ({
-          sessionId: rec.sessionId,
-          sessionNumber: rec.sessionNumber,
-          timestamp: rec.timestamp,
-          url: rec.url,
-          filename: rec.filename,
-          blobData: Array.from(new Uint8Array(rec.blob)) // Convert blob to array for storage
-        }));
-        localStorage.setItem('vocalBoothRecordings', JSON.stringify(recordingsToSave));
-        console.log('🔄 App: Saved recordings to localStorage:', recordingsToSave.length);
+        try {
+          // Save each recording to IndexedDB
+          for (const rec of recordings) {
+            await indexedDBManager.saveRecording(rec);
+          }
+
+          
+          // Log storage usage
+          await indexedDBManager.getStorageEstimate();
+        } catch (error) {
+          console.error('❌ App: Error saving recordings to IndexedDB:', error);
+        }
       }
-    } catch (error) {
-      console.error('❌ App: Failed to save recordings to localStorage:', error);
-      // Fallback: show error to user
-      alert('Failed to save recordings. Your browser may be in private mode or storage is full.');
-    }
+    };
+    
+    saveRecordings();
   }, [recordings]);
 
   // Check for existing login and session state on mount
@@ -129,11 +123,11 @@ const App: React.FC = () => {
             const parsedRecordings = JSON.parse(savedRecordings);
             // Only redirect to completion if user has completed all 3 sessions
             if (parsedRecordings.length >= 3) {
-              console.log('🔄 App: User has completed all sessions, redirecting to completion');
+
               setCurrentStep(AppStep.COMPLETION);
               return;
             } else {
-              console.log('🔄 App: User has completed some sessions but not all, checking session state');
+
             }
           } catch (error) {
             console.error('Error parsing recordings for redirect:', error);
@@ -144,7 +138,7 @@ const App: React.FC = () => {
         const savedSession = localStorage.getItem('vocalBoothCurrentSession');
         if (savedSession) {
           const sessionData = JSON.parse(savedSession);
-          console.log('🔄 App: Found saved session, redirecting:', sessionData);
+
           
           // Redirect based on saved session state
           if (sessionData.isBreakScreen) {
@@ -168,8 +162,6 @@ const App: React.FC = () => {
         // Reset device states on auto-login
         setVideoReady(false);
         setAudioReady(false);
-        setVideoEnabled(false);
-        setAudioEnabled(false);
       }
     } catch (error) {
       console.error('❌ App: Error loading from localStorage:', error);
@@ -184,13 +176,11 @@ const App: React.FC = () => {
     const userData = { fullName, docId: fullName };
     setUser(userData);
     setCurrentStep(AppStep.DASHBOARD);
-    
+
     // Reset device states on fresh login
     setVideoReady(false);
     setAudioReady(false);
-    setVideoEnabled(false);
-    setAudioEnabled(false);
-    
+
     // Save to localStorage for persistence
     localStorage.setItem('vocalBoothUser', JSON.stringify(userData));
   };
@@ -199,17 +189,7 @@ const App: React.FC = () => {
     setUser(null);
     setCurrentStep(AppStep.LOGIN);
     
-    // Aggressively stop ALL possible streams
-    const stopAllStreams = (stream: MediaStream | null) => {
-      if (stream) {
-        stream.getTracks().forEach(track => {
-          track.stop();
-          track.enabled = false;
-        });
-      }
-    };
-    
-    // Stop current app stream
+    // Stop ALL possible streams properly
     stopAllStreams(mediaStream);
     
     // Stop dashboard stream
@@ -218,41 +198,28 @@ const App: React.FC = () => {
       stopAllStreams(dashboardStream);
     }
     
-    // Force stop ALL media streams by getting new stream and immediately stopping it
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      .then(stream => {
-        stream.getTracks().forEach(track => track.stop());
-        console.log('🔄 Force-stopped any remaining streams');
-      })
-      .catch(() => {
-        // No streams to stop, which is good
-        console.log('✅ No additional streams found');
-      });
-    
     // Reset device states on logout
     setVideoReady(false);
     setAudioReady(false);
-    setVideoEnabled(false);
-    setAudioEnabled(false);
-    setMediaStream(null); // Reset stream to force re-initialization
-    setRecordings([]); // Clear recordings from state
+    setMediaStream(null);
+    setRecordings([]);
     
     // Clear all localStorage data
     localStorage.removeItem('vocalBoothUser');
     localStorage.removeItem('vocalBoothCurrentSession');
     localStorage.removeItem('vocalBoothRecordings');
     
-    // Force garbage collection to clean up stream references
-    if (window.gc) {
-      window.gc();
-    }
+    // Clear IndexedDB recordings
+    indexedDBManager.clearAllRecordings().catch(err => {
+      console.error('❌ Failed to clear IndexedDB:', err);
+    });
     
-    // Additional: Force page reload after a short delay to ensure browser indicators update
+
+    
+    // Reload page to ensure clean state
     setTimeout(() => {
       window.location.reload();
-    }, 1000);
-    
-    console.log('🔴 App: User logged out, all streams stopped aggressively');
+    }, 500);
   };
 
   const handleStartExam = () => {
@@ -262,112 +229,68 @@ const App: React.FC = () => {
   };
 
   const handleDeviceStatusUpdate = (videoStatus: boolean, audioStatus: boolean, videoToggleStatus?: boolean, audioToggleStatus?: boolean, stream?: MediaStream | null) => {
-    console.log("🔄 App: Device status update received");
-    console.log("🔄 App: Status details:", {
-      videoStatus,
-      audioStatus,
-      videoToggleStatus,
-      audioToggleStatus,
-      hasStream: !!stream,
-      streamActive: stream?.active,
-      streamTracks: stream?.getTracks().length || 0,
-      streamId: stream?.id
-    });
+
+    
     
     setVideoReady(videoStatus);
     setAudioReady(audioStatus);
-    if (videoToggleStatus !== undefined) setVideoEnabled(videoToggleStatus);
-    if (audioToggleStatus !== undefined) setAudioEnabled(audioToggleStatus);
     if (stream !== undefined) {
-      console.log("🔄 App: Updating mediaStream state");
+
       if (stream) {
-        console.log("🔄 App: New stream details:", {
-          active: stream.active,
-          id: stream.id,
-          tracks: stream.getTracks().map(t => ({
-            kind: t.kind,
-            enabled: t.enabled,
-            readyState: t.readyState,
-            label: t.label
-          }))
-        });
+        
       } else {
-        console.log("🔄 App: Stream is null/undefined");
+
       }
       setMediaStream(stream);
     }
   };
 
   const handleReloadDevices = () => {
-    console.log('🔄 App: handleReloadDevices called');
-    
+
+
     // Reset device states
     setVideoReady(false);
     setAudioReady(false);
-    setVideoEnabled(false);
-    setAudioEnabled(false);
     setMediaStream(null);
-    
+
     // If dashboard is available, reload from dashboard
     if (dashboardRef.current) {
-      console.log('🔄 App: Reloading from dashboard');
+
       dashboardRef.current.reloadDevices();
-      
+
       // Wait a bit then get updated stream
       setTimeout(() => {
         const updatedStream = dashboardRef.current?.getMediaStream();
         if (updatedStream) {
-          console.log('🔄 App: Got updated stream from dashboard');
+
           setMediaStream(updatedStream);
         }
       }, 1000);
     } else {
-      console.log('🔄 App: Dashboard not available, creating new stream request');
+
       // For BreakScreen context, we need to request new permissions
-      navigator.mediaDevices.getUserMedia({ 
-        video: true, 
-        audio: true 
+      navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true
       }).then(stream => {
-        console.log('🔄 App: Got new stream directly');
+
         setMediaStream(stream);
         setVideoReady(true);
         setAudioReady(true);
-        setVideoEnabled(true);
-        setAudioEnabled(true);
       }).catch(error => {
         console.error('🔄 App: Error getting new stream:', error);
       });
     }
   };
 
-  const handleToggleVideo = () => {
-    if (dashboardRef.current) {
-      dashboardRef.current.toggleVideo();
-      // Update stream after toggle
-      const updatedStream = dashboardRef.current.getMediaStream();
-      if (updatedStream) {
-        setMediaStream(updatedStream);
-      }
-    }
-  };
 
-  const handleToggleAudio = () => {
-    if (dashboardRef.current) {
-      dashboardRef.current.toggleAudio();
-      // Update stream after toggle
-      const updatedStream = dashboardRef.current.getMediaStream();
-      if (updatedStream) {
-        setMediaStream(updatedStream);
-      }
-    }
-  };
 
   const saveRecording = (blob: Blob, sessionId: number) => {
     if (!user) return;
     
     // Create URL for session persistence
     const url = URL.createObjectURL(blob);
-    const filename = `${user.fullName.replace(/\s+/g, '_')}_Session_${sessionId}.webm`;
+    const filename = `${user.fullName.replace(/\s+/g, '_')}_GEUWAT_Session_${sessionId}.webm`;
 
     const newRecording: Recording = {
       sessionId,
@@ -401,14 +324,10 @@ const App: React.FC = () => {
       timestamp: Date.now()
     };
     localStorage.setItem('vocalBoothCurrentSession', JSON.stringify(sessionData));
-    console.log('🔄 App: Saving session state:', sessionData);
+
   };
 
-  // Clear session state
-  const clearSessionState = () => {
-    localStorage.removeItem('vocalBoothCurrentSession');
-    console.log('🔄 App: Clearing session state');
-  };
+
 
   // Save break screen state when user is on break screen
   useEffect(() => {
@@ -594,14 +513,14 @@ const App: React.FC = () => {
               title="Tongue Twister (American Accent)"
               textContent={
                 <p>
-                  "Betty Botter bought some butter,<br/>
-                  but she said, 'This butter's bitter.'<br/>
-                  'If I put it in my batter,<br/>
-                  it will make my batter bitter.'<br/>
+                  Betty Botter bought some butter,<br/>
+                  but she said, &apos;This butter&apos;s bitter.&apos;<br/>
+                  &apos;If I put it in my batter,<br/>
+                  it will make my batter bitter.&apos;<br/>
                   But a bit of better butter<br/>
-                  will make my batter better.'<br/>
+                  will make my batter better.&apos;<br/>
                   So, it was better:<br/>
-                  Betty Botter bought a bit of better butter."
+                  Betty Botter bought a bit of better butter.
                 </p>
               }
               mediaStream={mediaStream}
@@ -630,16 +549,13 @@ const App: React.FC = () => {
               title="Phonetic Transcription (American IPA)"
               textContent={
                 <p className="font-mono text-amber-200">
-                  aɪ ˈstɑrtɪd ˈlɜrnɪŋ ˈɪŋɡlɪʃ jərz əˈɡoʊ, ænd aɪ ˈstrʌɡəld æt fɜrst.<br/>
-                  aɪ ˈpræktɪst ˈɛvri deɪ, rɪˈpitɪd ˈdɪfəkəlt ˈsɛntənsɪz, ænd kəˈrɛktɪd maɪ mɪsˈteɪks.<br/>
-                  æt taɪmz, aɪ ˈdaʊtɪd ˌmaɪˈsɛlf, bʌt aɪ riˈmaɪndɪd ˌmaɪˈsɛlf waɪ aɪ ˈstɑrtɪd.<br/><br/>
+                  wɛn aɪ ˈstɑrtɪd, aɪ ˈdɪdənt ˌʌndərˈstænd ˈmɛni θɪŋz. ðə wɜrdz wɜr fæst, ænd ðə saʊndz wɜr kənˈfjuzɪŋ. aɪ mɪst ə lɑt, ænd aɪ meɪd ˈmɛni mɪsˈteɪks, bʌt aɪ ˈdɪdənt stɑp.<br/><br/>
 
-                  aɪ ˈnoʊtəst ˈprɑˌɡrɛs ˈæftər aɪ wɜrkt hɑrd ænd steɪd ˈfoʊkəst.<br/>
-                  ði ˈɛfərt aɪ ɪnˈvɛstɪd rɪˈwɔrdɪd mi wɪð ˈkɑnfədəns ænd skɪl.<br/>
-                  ˈivɪn wɛn aɪ fɛlt ˈtaɪərd ɔr ˈfrʌˌstreɪtəd, aɪ riˈmaɪndɪd ˌmaɪˈsɛlf ðæt ˈlɜrnɪŋ ɪz ə ˈprɑˌsɛs, ænd ˈɛvri stɛp ˈmætərd.<br/><br/>
+                  aɪv ˈpræktɪst ˈɛvri deɪ. aɪm ˈɡɛtɪŋ ˈbɛtər, ænd maɪ ˈsɛntənsɪz saʊnd ˈklɪrər. ˈsʌmˌtaɪmz aɪ fərˈɡɑt rulz, ænd ˈsʌmˌtaɪmz aɪ mɪst smɔl dɪˈteɪlz, bʌt ðoʊz mɪsˈteɪks hɛlpt mi ɪmˈpruv.<br/><br/>
 
-                  aɪ ˈfɪnɪʃt ˈlɛsənz aɪ θɔt aɪ ˈkʊdənt, ˈsɛləˌbreɪtɪd smɔl wɪnz, ænd ʃɛrd wɑt aɪ lɜrnd wɪð ˈʌðərz.<br/>
-                  baɪ ˈsteɪɪŋ ˈdɪsəplənd ænd ˈmoʊtəˌveɪtəd, aɪ dɪˈskʌvərd ðæt θɪŋz aɪ wʌns faʊnd hɑrd ˈdɪdənt fil hɑrd ˌɛniˈmɔr.
+                  ˈɪŋɡlɪʃ ˈoʊpənz ˈmɛni dɔrz ænd kəˈnɛkts ˈpipəl frʌm ˈdɪfrənt ˈpleɪsɪz. ðə mɔr aɪ ˈpræktɪs, ðə ˈbɛtər ɪt ɡɛts. aɪ ˈhævənt lɜrnd ˈɛvriˌθɪŋ jɛt, bʌt ðæts pɑrt ʌv ðə ˈprɑˌsɛs.<br/><br/>
+
+                  soʊ aɪ doʊnt kwɪt. ˈɛvri ˈlɪtəl stɛp bɪldz maɪ skɪlz, ænd ˈɛvri ˈlɛsən ˈmætərz.
                 </p>
               }
               mediaStream={mediaStream}
@@ -668,16 +584,13 @@ const App: React.FC = () => {
               title="Original Text Reading"
               textContent={
                 <p>
-                  I started learning English years ago, and I struggled at first.<br/>
-                  I practiced every day, repeated difficult sentences, and corrected my mistakes.<br/>
-                  At times, I doubted myself, but I reminded myself why I started.<br/><br/>
+                  When I started, I didn&apos;t understand many things. The words were fast, and the sounds were confusing. I missed a lot, and I made many mistakes, but I didn&apos;t stop.<br/><br/>
 
-                  I noticed progress after I worked hard and stayed focused.<br/>
-                  The effort I invested rewarded me with confidence and skill.<br/>
-                  Even when I felt tired or frustrated, I reminded myself that learning is a process, and every step mattered.<br/><br/>
+                  I&apos;ve practiced every day. I&apos;m getting better, and my sentences sound clearer. Sometimes I forgot rules, and sometimes I missed small details, but those mistakes helped me improve.<br/><br/>
 
-                  I finished lessons I thought I couldn't, celebrated small wins, and shared what I learned with others.<br/>
-                  By staying disciplined and motivated, I discovered that things I once found hard didn't feel hard anymore.
+                  English opens many doors and connects people from different places. The more I practice, the better it gets. I haven&apos;t learned everything yet, but that&apos;s part of the process.<br/><br/>
+
+                  So I don&apos;t quit. Every little step builds my skills, and every lesson matters.
                 </p>
               }
               mediaStream={mediaStream}
@@ -695,3 +608,4 @@ const App: React.FC = () => {
 };
 
 export default App;
+

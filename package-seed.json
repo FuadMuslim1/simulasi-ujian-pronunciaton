@@ -1,0 +1,16 @@
+{
+  "name": "seed-users",
+  "version": "1.0.0",
+  "description": "Seed users to Firestore",
+  "type": "module",
+  "scripts": {
+    "seed": "npx tsx seedUsers.ts"
+  },
+  "dependencies": {
+    "firebase": "^10.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}

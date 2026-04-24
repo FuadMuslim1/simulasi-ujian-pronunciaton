@@ -1,6 +1,10 @@
-import React, { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react';
-import { Camera, Mic, Play, AlertCircle, Power, MicOff, VideoOff, RefreshCw } from 'lucide-react';
+import React, { useEffect, useRef, useState, forwardRef, useImperativeHandle, useCallback } from 'react';
+import { Camera, Mic, Play, AlertCircle, MicOff, VideoOff, RefreshCw } from 'lucide-react';
 import { User } from '../types';
+
+// Constants
+const DEVICE_CHECK_INTERVAL = 5000; // 5 seconds
+const STREAM_STATUS_CHECK_INTERVAL = 2000; // 2 seconds
 
 interface DashboardProps {
   user: User;
@@ -8,12 +12,15 @@ interface DashboardProps {
   onDeviceStatusUpdate?: (videoReady: boolean, audioReady: boolean, videoEnabled?: boolean, audioEnabled?: boolean, stream?: MediaStream | null) => void;
 }
 
-const Dashboard = forwardRef<{ 
+interface DashboardRef {
   reloadDevices: () => void;
   toggleVideo: () => void;
   toggleAudio: () => void;
   getMediaStream: () => MediaStream | null;
-}, DashboardProps>(({ user, onStart, onDeviceStatusUpdate }, ref) => {
+  setRecordingState: (isRecording: boolean) => void;
+}
+
+const Dashboard = forwardRef<DashboardRef, DashboardProps>(({ user, onStart, onDeviceStatusUpdate }, ref) => {
   const videoPreviewRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const selfRef = useRef<{ toggleVideo: () => void; toggleAudio: () => void }>({ toggleVideo: () => {}, toggleAudio: () => {} });
@@ -25,7 +32,7 @@ const Dashboard = forwardRef<{
   const [audioEnabled, setAudioEnabled] = useState(false);
 
   // Function to inspect the stream tracks independently
-  const checkTrackStatus = (stream: MediaStream | null) => {
+  const checkTrackStatus = useCallback((stream: MediaStream | null) => {
     if (!stream) {
         setVideoReady(false);
         setAudioReady(false);
@@ -50,9 +57,8 @@ const Dashboard = forwardRef<{
     const hasEndedAudioTrack = hasAudioTrack && audioTracks.some(track => track.readyState === 'ended');
 
     if (hasEndedVideoTrack || hasEndedAudioTrack) {
-      console.warn("🔄 Dashboard: Detected ended tracks, attempting recovery");
-      // Trigger device re-enabling
-      enableDevices();
+
+      // Recovery will be handled by the polling useEffect
       return;
     }
 
@@ -75,20 +81,10 @@ const Dashboard = forwardRef<{
       setAudioEnabled(false);
     }
     
-    console.log("Status Check -> Video:", {
-      hasTrack: hasVideoTrack, 
-      isLive: isVideoLive, 
-      enabled: hasVideoTrack ? videoTracks[0].enabled : false,
-      ready: isVideoLive
-    }, "Audio:", {
-      hasTrack: hasAudioTrack, 
-      isLive: isAudioLive, 
-      enabled: hasAudioTrack ? audioTracks[0].enabled : false,
-      ready: isAudioLive
-    });
-  };
+    
+  }, []);
 
-  const enableDevices = async () => {
+  const enableDevices = useCallback(async () => {
     try {
       setPermissionError(false);
       
@@ -100,8 +96,6 @@ const Dashboard = forwardRef<{
       // Request camera and microphone separately
       let videoStream: MediaStream | null = null;
       let audioStream: MediaStream | null = null;
-      let videoPermissionGranted = false;
-      let audioPermissionGranted = false;
 
       try {
         videoStream = await navigator.mediaDevices.getUserMedia({ 
@@ -112,18 +106,16 @@ const Dashboard = forwardRef<{
             frameRate: { ideal: 30 }
           }
         });
-        videoPermissionGranted = true;
-      } catch (videoErr) {
-        console.warn("Camera access denied:", videoErr);
+      } catch {
+
         setVideoReady(false);
         setVideoEnabled(false);
       }
 
       try {
         audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        audioPermissionGranted = true;
-      } catch (audioErr) {
-        console.warn("Microphone access denied:", audioErr);
+      } catch {
+
         setAudioReady(false);
         setAudioEnabled(false);
       }
@@ -158,40 +150,33 @@ const Dashboard = forwardRef<{
         setAudioEnabled(false);
       }
 
-    } catch (err) {
-      console.error("Device access error:", err);
+    } catch (error) {
+      console.error("Device access error:", error);
       setPermissionError(true);
       setVideoReady(false);
       setAudioReady(false);
       setVideoEnabled(false);
       setAudioEnabled(false);
     }
-  };
+  }, [checkTrackStatus]);
 
   // SMART AUTO-REFRESH ONLY WHEN DEVICES DISCONNECTED
   useEffect(() => {
     const checkAndReconnect = () => {
       if (streamRef.current && (!videoReady || !audioReady)) {
-        console.log("Devices disconnected, attempting reconnect...");
+
         enableDevices();
       }
     };
 
-    const checkInterval = setInterval(checkAndReconnect, 5000); // Check every 5 seconds
+    const checkInterval = setInterval(checkAndReconnect, DEVICE_CHECK_INTERVAL);
     return () => clearInterval(checkInterval);
-  }, [streamRef.current, videoReady, audioReady]);
+  }, [enableDevices, videoReady, audioReady]);
 
   // Update parent component with device status
   useEffect(() => {
-    console.log("📡 Dashboard: Updating parent with device status");
-    console.log("📡 Dashboard: Status update:", {
-      videoReady,
-      audioReady,
-      videoEnabled,
-      audioEnabled,
-      hasStream: !!streamRef.current,
-      streamActive: streamRef.current?.active
-    });
+
+    
     
     if (onDeviceStatusUpdate) {
       onDeviceStatusUpdate(videoReady, audioReady, videoEnabled, audioEnabled, streamRef.current);
@@ -200,7 +185,7 @@ const Dashboard = forwardRef<{
 
   // Check for existing login and session state on mount
   useEffect(() => {
-    console.log("🎥 Dashboard: Component mounted, waiting for user interaction...");
+
     // Don't auto-start devices in production - wait for user interaction
     // enableDevices(); // Removed auto-start
   }, []);
@@ -225,9 +210,9 @@ const Dashboard = forwardRef<{
       try {
         track.addEventListener('enabled', handleTrackChange);
         track.addEventListener('disabled', handleTrackChange);
-      } catch (e) {
+      } catch {
         // Fallback for browsers that don't support these events
-        console.warn('Track enabled/disabled events not supported:', e);
+
       }
     });
 
@@ -244,20 +229,20 @@ const Dashboard = forwardRef<{
             try {
               track.removeEventListener('enabled', handleTrackChange);
               track.removeEventListener('disabled', handleTrackChange);
-            } catch (e) {
+            } catch {
               // Ignore cleanup errors for unsupported events
             }
         });
       }
     };
-  }, [streamRef.current]);
+  }, [checkTrackStatus]);
 
   // Ensure video element gets stream if it re-renders
   useEffect(() => {
     if (videoPreviewRef.current && streamRef.current) {
         videoPreviewRef.current.srcObject = streamRef.current;
     }
-  }, [streamRef.current, videoReady]);
+  }, [videoReady, streamRef, videoPreviewRef]);
 
   // Poll status to ensure toggle changes are detected
   useEffect(() => {
@@ -265,66 +250,38 @@ const Dashboard = forwardRef<{
 
     const pollInterval = setInterval(() => {
       checkTrackStatus(streamRef.current);
-    }, 2000); // Check every 2 seconds
+    }, STREAM_STATUS_CHECK_INTERVAL);
 
     return () => clearInterval(pollInterval);
-  }, []);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      console.log('🧹 Dashboard: Cleaning up on unmount');
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => {
-          console.log(`🛑 Stopping track: ${track.kind} (${track.label})`);
-          track.stop();
-          track.enabled = false;
-        });
-        streamRef.current = null;
-      }
-      
-      // Also clear video element source
-      if (videoPreviewRef.current) {
-        videoPreviewRef.current.srcObject = null;
-      }
-    };
-  }, []);
+  }, [checkTrackStatus, streamRef]);
 
   const allSystemsGo = videoReady && audioReady && videoEnabled && audioEnabled;
 
   // Expose reloadDevices function to parent component
   useImperativeHandle(ref, () => {
     const toggleVideoFunc = () => {
-      console.log('Toggle Video clicked (useImperativeHandle)');
+      
       if (streamRef.current) {
         const videoTracks = streamRef.current.getVideoTracks();
-        console.log('Video tracks found:', videoTracks.length);
-        videoTracks.forEach((track, index) => {
-          const oldState = track.enabled;
+
+        videoTracks.forEach((track) => {
           track.enabled = !track.enabled;
-          console.log(`Video track ${index}: ${oldState} -> ${track.enabled}`);
         });
         // Re-check status to update all states correctly
         checkTrackStatus(streamRef.current);
-      } else {
-        console.log('No stream available for video toggle');
       }
     };
 
     const toggleAudioFunc = () => {
-      console.log('Toggle Audio clicked (useImperativeHandle)');
+      
       if (streamRef.current) {
         const audioTracks = streamRef.current.getAudioTracks();
-        console.log('Audio tracks found:', audioTracks.length);
-        audioTracks.forEach((track, index) => {
-          const oldState = track.enabled;
+
+        audioTracks.forEach((track) => {
           track.enabled = !track.enabled;
-          console.log(`Audio track ${index}: ${oldState} -> ${track.enabled}`);
         });
         // Re-check status to update all states correctly
         checkTrackStatus(streamRef.current);
-      } else {
-        console.log('No stream available for audio toggle');
       }
     };
 
@@ -338,50 +295,42 @@ const Dashboard = forwardRef<{
       toggleAudio: toggleAudioFunc,
       getMediaStream: () => streamRef.current
     };
-  }, []);
+  }, [checkTrackStatus, enableDevices]);
 
   // Update selfRef whenever stream changes to ensure toggle functions work correctly
   useEffect(() => {
-    console.log('Updating selfRef with new toggle functions');
+
     const toggleVideoFunc = () => {
-      console.log('Toggle Video clicked (selfRef update)');
+      
       if (streamRef.current) {
         const videoTracks = streamRef.current.getVideoTracks();
-        console.log('Video tracks found (selfRef):', videoTracks.length);
-        videoTracks.forEach((track, index) => {
-          const oldState = track.enabled;
+        
+        videoTracks.forEach((track) => {
           track.enabled = !track.enabled;
-          console.log(`Video track ${index} (selfRef): ${oldState} -> ${track.enabled}`);
         });
         // Re-check status to update all states correctly
         checkTrackStatus(streamRef.current);
-      } else {
-        console.log('No stream available for video toggle (selfRef)');
       }
     };
 
     const toggleAudioFunc = () => {
-      console.log('Toggle Audio clicked (selfRef update)');
+      
       if (streamRef.current) {
         const audioTracks = streamRef.current.getAudioTracks();
-        console.log('Audio tracks found (selfRef):', audioTracks.length);
-        audioTracks.forEach((track, index) => {
-          const oldState = track.enabled;
+        
+        audioTracks.forEach((track) => {
           track.enabled = !track.enabled;
-          console.log(`Audio track ${index} (selfRef): ${oldState} -> ${track.enabled}`);
         });
         // Re-check status to update all states correctly
         checkTrackStatus(streamRef.current);
-      } else {
-        console.log('No stream available for audio toggle (selfRef)');
       }
     };
 
     // Update selfRef for internal use
     selfRef.current.toggleVideo = toggleVideoFunc;
     selfRef.current.toggleAudio = toggleAudioFunc;
-    console.log('selfRef updated successfully');
-  }, []);
+
+  }, [checkTrackStatus]);
 
   return (
     <div className="flex flex-col h-full text-white">
@@ -515,3 +464,5 @@ const Dashboard = forwardRef<{
 Dashboard.displayName = 'Dashboard';
 
 export default Dashboard;
+
+

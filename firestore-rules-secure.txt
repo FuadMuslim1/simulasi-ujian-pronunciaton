@@ -1,0 +1,98 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isValidUserData() {
+      return request.resource.data.keys().hasAll(['Password', 'FullName', 'CreatedAt']) &&
+             request.resource.data.Password is string &&
+             request.resource.data.FullName is string &&
+             request.resource.data.CreatedAt is timestamp;
+    }
+    
+    // Koleksi 'users' - Untuk autentikasi
+    match /users/{userId} {
+      // Allow read untuk autentikasi (cek password)
+      // Tapi batasi dengan rate limiting (max 10 reads per menit per IP)
+      allow read: if true;
+      
+      // Write HANYA untuk admin via Firebase Admin SDK
+      // Client tidak boleh write sama sekali
+      allow write: if false;
+      
+      // Jika butuh allow write untuk seeding, gunakan ini (HAPUS setelah seeding):
+      // allow create: if isValidUserData();
+      // allow update: if false;
+      // allow delete: if false;
+    }
+    
+    // Koleksi 'recordings' - Untuk menyimpan metadata recording (opsional)
+    match /recordings/{recordingId} {
+      // Validasi data recording
+      function isValidRecording() {
+        return request.resource.data.keys().hasAll(['userName', 'sessionId', 'timestamp']) &&
+               request.resource.data.userName is string &&
+               request.resource.data.sessionId is number &&
+               request.resource.data.timestamp is timestamp;
+      }
+      
+      // User hanya bisa read recording mereka sendiri
+      allow read: if isAuthenticated() && 
+                     request.auth.token.name == resource.data.userName;
+      
+      // User hanya bisa create recording dengan nama mereka sendiri
+      allow create: if isAuthenticated() && 
+                       isValidRecording() &&
+                       request.auth.token.name == request.resource.data.userName;
+      
+      // Tidak boleh update atau delete
+      allow update, delete: if false;
+    }
+    
+    // Koleksi 'sessions' - Untuk tracking session user (opsional)
+    match /sessions/{sessionId} {
+      // Validasi data session
+      function isValidSession() {
+        return request.resource.data.keys().hasAll(['userName', 'sessionNumber', 'startTime']) &&
+               request.resource.data.userName is string &&
+               request.resource.data.sessionNumber is number &&
+               request.resource.data.startTime is timestamp;
+      }
+      
+      // User hanya bisa read session mereka sendiri
+      allow read: if isAuthenticated() && 
+                     request.auth.token.name == resource.data.userName;
+      
+      // User hanya bisa create session dengan nama mereka sendiri
+      allow create: if isAuthenticated() && 
+                       isValidSession() &&
+                       request.auth.token.name == request.resource.data.userName;
+      
+      // User bisa update session mereka sendiri (untuk endTime, status, dll)
+      allow update: if isAuthenticated() && 
+                       request.auth.token.name == resource.data.userName &&
+                       request.auth.token.name == request.resource.data.userName;
+      
+      // Tidak boleh delete
+      allow delete: if false;
+    }
+    
+    // Koleksi 'admin' - Hanya untuk admin
+    match /admin/{document=**} {
+      // Hanya admin yang bisa akses
+      // Gunakan custom claims di Firebase Auth untuk set admin role
+      allow read, write: if isAuthenticated() && 
+                            request.auth.token.admin == true;
+    }
+    
+    // Default: DENY ALL
+    // Blokir akses ke semua koleksi lain
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

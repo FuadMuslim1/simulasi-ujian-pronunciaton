@@ -1,0 +1,10 @@
+- [x] Move enableDevices definition before checkTrackStatus
+- [x] Update checkTrackStatus useCallback deps to [enableDevices]
+- [x] Update enableDevices useCallback deps to []
+- [x] Remove unused 'e' in catch block (change to catch {})
+- [x] In cleanup useEffect, copy videoPreviewRef.current to local var
+- [x] Add [checkTrackStatus, enableDevices] to useImperativeHandle deps
+- [x] Add [checkTrackStatus] to last useEffect deps
+- [x] Remove unused 'progress' variable
+- [x] Fix videoRef.current cleanup warning by copying to local variable
+- [x] Add missing dependencies to useEffect

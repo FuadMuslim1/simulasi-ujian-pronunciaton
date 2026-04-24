@@ -1,13 +1,16 @@
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-export default defineConfig(() => {
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+export default defineConfig(({ mode }) => {
     return {
       base: './',
       server: {
-        port: 3000,
-        host: '0.0.0.0',
+        port: 4001,
+        host: 'localhost',
       },
       plugins: [react()],
       resolve: {
@@ -19,10 +22,16 @@ export default defineConfig(() => {
         rollupOptions: {
           output: {
             manualChunks: {
-              vendor: ['react', 'react-dom'],
-              router: ['react-router-dom'],
-              query: ['@tanstack/react-query']
+              vendor: ['react', 'react-dom']
             }
+          }
+        },
+        minify: 'terser',
+        terserOptions: {
+          compress: {
+            drop_console: mode === 'production',
+            drop_debugger: true,
+            pure_funcs: mode === 'production' ? ['console.log', 'console.debug', 'console.info'] : []
           }
         }
       }

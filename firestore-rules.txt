@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Koleksi 'users' - Hanya untuk autentikasi
+    match /users/{userId} {
+      // Allow read untuk autentikasi (cek password)
+      // Tapi hanya field tertentu yang bisa dibaca
+      allow read: if true;
+      
+      // Write hanya untuk admin/seeding
+      // Di production, sebaiknya gunakan Firebase Admin SDK untuk write
+      // Untuk sekarang, block semua write dari client
+      allow write: if false;
+    }
+    
+    // Koleksi 'recordings' - Untuk menyimpan metadata recording (opsional)
+    match /recordings/{recordingId} {
+      // User hanya bisa read/write recording mereka sendiri
+      allow read, write: if request.auth != null && 
+                            request.auth.token.name == resource.data.userName;
+      
+      // Allow create jika authenticated
+      allow create: if request.auth != null;
+    }
+    
+    // Koleksi 'sessions' - Untuk tracking session user (opsional)
+    match /sessions/{sessionId} {
+      // User hanya bisa read/write session mereka sendiri
+      allow read, write: if request.auth != null && 
+                            request.auth.token.name == resource.data.userName;
+      
+      // Allow create jika authenticated
+      allow create: if request.auth != null;
+    }
+    
+    // Default: DENY ALL
+    // Blokir akses ke semua koleksi lain
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

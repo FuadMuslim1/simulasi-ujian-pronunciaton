@@ -66,7 +66,7 @@ const Completion: React.FC<CompletionProps> = ({ user, recordings }) => {
             <li className="relative">
               <span className="absolute -left-[39px] w-6 h-6 bg-blue-900 rounded-full border-2 border-gray-900 flex items-center justify-center text-[10px] font-bold">2</span>
               <strong>Set Permissions:</strong>
-              <p className="text-sm text-gray-400 mt-1">Ensure the folder or files are set to "Anyone with the link can view".</p>
+              <p className="text-sm text-gray-400 mt-1">Ensure the folder or files are set to &ldquo;Anyone with the link can view&rdquo;.</p>
             </li>
             <li className="relative">
               <span className="absolute -left-[39px] w-6 h-6 bg-blue-900 rounded-full border-2 border-gray-900 flex items-center justify-center text-[10px] font-bold">3</span>
@@ -86,3 +86,4 @@ const Completion: React.FC<CompletionProps> = ({ user, recordings }) => {
 };
 
 export default Completion;
+

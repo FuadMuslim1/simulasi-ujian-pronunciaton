@@ -1,9 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { User } from '../types';
 import { Mic, Timer, ArrowRight, Video, AlertCircle } from 'lucide-react';
 
 interface SessionRecorderProps {
-  user: User;
   sessionNumber: number;
   title: string;
   textContent: React.ReactNode;
@@ -12,20 +10,12 @@ interface SessionRecorderProps {
 }
 
 const SessionRecorder: React.FC<SessionRecorderProps> = ({
-  user,
   sessionNumber,
   title,
   textContent,
   onComplete,
   mediaStream,
 }) => {
-  console.log("🔍 SessionRecorder: Component rendered with mediaStream:", mediaStream);
-  console.log("🔍 SessionRecorder: mediaStream details:", {
-    exists: !!mediaStream,
-    active: mediaStream?.active || false,
-    id: mediaStream?.id || 'no-id',
-    tracks: mediaStream?.getTracks().length || 0
-  });
   
   const [timeLeft, setTimeLeft] = useState(60);
   const [isRecording, setIsRecording] = useState(false);
@@ -39,17 +29,32 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const onCompleteRef = useRef(onComplete);
+  const errorRef = useRef<string | null>(null);
+  const isRecordingRef = useRef(false);
   
   // Flag to check if stop event is expected (timer or user finish) vs unexpected (crash)
   const isExpectedToEnd = useRef(false);
   const mountedRef = useRef(true);
+  const isInitializingRef = useRef(false);
 
   // Drag handlers
   const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
     setIsDragging(true);
     setDragStart({
       x: e.clientX - position.x,
       y: e.clientY - position.y
+    });
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    setIsDragging(true);
+    setDragStart({
+      x: touch.clientX - position.x,
+      y: touch.clientY - position.y
     });
   };
 
@@ -59,13 +64,37 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({
     const newX = e.clientX - dragStart.x;
     const newY = e.clientY - dragStart.y;
     
-    // Keep within viewport bounds
-    const maxX = window.innerWidth - 224; // Width of preview (lg:w-56 = 14rem = 224px)
-    const maxY = window.innerHeight - 168; // Height of preview (lg:h-42 = 10.5rem = 168px)
+    // Allow free dragging with minimal constraints (just keep it partially visible)
+    const maxX = window.innerWidth - 100; // Keep at least 100px visible
+    const maxY = window.innerHeight - 100; // Keep at least 100px visible
+    const minX = -150; // Allow 150px to be hidden on the left
+    const minY = -100; // Allow 100px to be hidden on top
     
     setPosition({
-      x: Math.max(0, Math.min(newX, maxX)),
-      y: Math.max(0, Math.min(newY, maxY))
+      x: Math.max(minX, Math.min(newX, maxX)),
+      y: Math.max(minY, Math.min(newY, maxY))
+    });
+  }, [isDragging, dragStart]);
+
+  const handleTouchMove = useCallback((e: globalThis.Event) => {
+    const touchEvent = e as globalThis.Event & {
+      touches: ArrayLike<{ clientX: number; clientY: number }>;
+    };
+    if (!isDragging || touchEvent.touches.length === 0) return;
+
+    const touch = touchEvent.touches[0];
+    const newX = touch.clientX - dragStart.x;
+    const newY = touch.clientY - dragStart.y;
+    
+    // Allow free dragging with minimal constraints
+    const maxX = window.innerWidth - 100;
+    const maxY = window.innerHeight - 100;
+    const minX = -150;
+    const minY = -100;
+    
+    setPosition({
+      x: Math.max(minX, Math.min(newX, maxX)),
+      y: Math.max(minY, Math.min(newY, maxY))
     });
   }, [isDragging, dragStart]);
 
@@ -73,54 +102,52 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({
     setIsDragging(false);
   }, []);
 
-  // Add global mouse event listeners
+  const handleTouchEnd = useCallback(() => {
+    setIsDragging(false);
+  }, []);
+
+  // Add global mouse and touch event listeners
   useEffect(() => {
     if (isDragging) {
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
+      document.addEventListener('touchmove', handleTouchMove);
+      document.addEventListener('touchend', handleTouchEnd);
       return () => {
         document.removeEventListener('mousemove', handleMouseMove);
         document.removeEventListener('mouseup', handleMouseUp);
+        document.removeEventListener('touchmove', handleTouchMove);
+        document.removeEventListener('touchend', handleTouchEnd);
       };
     }
-  }, [isDragging, handleMouseMove, handleMouseUp]);
+  }, [isDragging, handleMouseMove, handleMouseUp, handleTouchMove, handleTouchEnd]);
 
-  // Track mediaStream prop changes
+  // Keep refs in sync to avoid stale closures without re-running heavy recorder effect
   useEffect(() => {
-    console.log("🔍 SessionRecorder: mediaStream prop changed:", {
-      exists: !!mediaStream,
-      active: mediaStream?.active || false,
-      id: mediaStream?.id || 'no-id',
-      tracks: mediaStream?.getTracks().length || 0
-    });
-  }, [mediaStream]);
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
+
+  useEffect(() => {
+    errorRef.current = error;
+  }, [error]);
+
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
 
   // Monitor stream changes during active session (for dashboard toggles)
   useEffect(() => {
     if (!mediaStream || !isRecording) return;
 
-    console.log("🔍 Debug: Monitoring stream changes during recording");
-    
     const checkStreamHealth = () => {
       if (!mediaStream) return;
       
       const tracks = mediaStream.getTracks();
       const videoTracks = tracks.filter(t => t.kind === 'video');
-      const audioTracks = tracks.filter(t => t.kind === 'audio');
       
       const hasActiveVideo = videoTracks.some(t => t.enabled && t.readyState === 'live');
-      const hasActiveAudio = audioTracks.some(t => t.enabled && t.readyState === 'live');
-      
-      console.log("🔍 Debug: Stream health check:", {
-        streamActive: mediaStream.active,
-        hasActiveVideo,
-        hasActiveAudio,
-        videoTracks: videoTracks.length,
-        audioTracks: audioTracks.length
-      });
       
       if (!mediaStream.active || !hasActiveVideo) {
-        console.warn("🔍 Debug: Stream health issue detected");
         setError("Camera was turned off. Please return to dashboard and restart session.");
         // Stop recording if stream becomes invalid
         if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
@@ -139,12 +166,10 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({
   }, [mediaStream, isRecording]);
 
   // Pre-validate and prepare stream before recording
-  const prepareStream = (stream: MediaStream): boolean => {
-    console.log("🔍 Debug: Preparing stream for recording");
+  const prepareStream = useCallback((stream: MediaStream): boolean => {
     
     // Check if stream is active
     if (!stream.active) {
-      console.error("🔍 Debug: Stream is inactive during preparation");
       return false;
     }
     
@@ -153,54 +178,94 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({
     let allTracksReady = true;
     
     tracks.forEach(track => {
-      console.log(`🔍 Debug: Track ${track.kind}:`, {
-        enabled: track.enabled,
-        readyState: track.readyState,
-        muted: track.muted
-      });
       
       // Enable track if disabled
       if (!track.enabled) {
-        console.log("🔍 Debug: Enabling track:", track.kind);
         track.enabled = true;
       }
       
       // Check if track is ready
       if (track.readyState !== 'live') {
-        console.warn("🔍 Debug: Track not ready:", track.kind, track.readyState);
         allTracksReady = false;
       }
     });
     
     return allTracksReady;
-  };
+  }, []);
+
+  const stopTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const handleFinishSession = useCallback(() => {
+    // Reset recording state immediately
+    setIsRecording(false);
+
+    // If there's an error, don't try to finish normally - just go to next session
+    if (errorRef.current) {
+      stopTimer();
+      // Create empty blob to maintain flow
+      const emptyBlob = new Blob([], { type: 'video/webm' });
+      onCompleteRef.current(emptyBlob);
+      return;
+    }
+
+    stopTimer();
+
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      isExpectedToEnd.current = true;
+      mediaRecorderRef.current.stop();
+    } else {
+      // Still complete the session to maintain flow
+      const emptyBlob = new Blob([], { type: 'video/webm' });
+      onCompleteRef.current(emptyBlob);
+    }
+  }, [stopTimer]);
+
+  const startTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+    }
+
+    timerRef.current = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          handleFinishSession();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, [handleFinishSession]);
 
   // Initialize Stream and Recorder
   useEffect(() => {
+    // Prevent race condition - only initialize if not already recording or initializing
+    if (isRecordingRef.current || isInitializingRef.current) {
+      return;
+    }
+    
     const initializeRecorder = () => {
-      console.log("🔍 Debug: initializeRecorder called");
-      console.log("🔍 Debug: mediaStream received:", mediaStream);
-      console.log("🔍 Debug: mediaStream type:", typeof mediaStream);
-      console.log("🔍 Debug: mediaStream.active:", mediaStream?.active || false);
-      console.log("🔍 Debug: mediaStream.id:", mediaStream?.id || 'no-id');
+      // Set initialization flag
+      isInitializingRef.current = true;
       
       if (!mediaStream) {
-        console.error("🔍 Debug: No media stream available");
         setError("No media stream available. Please return to dashboard.");
+        isInitializingRef.current = false; // Reset flag on error
         return;
       }
 
       // Prepare and validate stream before proceeding
       const isStreamReady = prepareStream(mediaStream);
       if (!isStreamReady) {
-        console.log("🔍 Debug: Stream not ready, attempting recovery...");
-        
         // Try to recover by enabling tracks
         const tracks = mediaStream.getTracks();
         tracks.forEach(track => {
           if (!track.enabled) {
             track.enabled = true;
-            console.log("🔍 Debug: Force-enabled track:", track.kind);
           }
         });
         
@@ -210,7 +275,6 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({
           if (!recovered) {
             setError("Stream recovery failed. Please return to dashboard and restart.");
           } else {
-            console.log("🔍 Debug: Stream recovery successful, proceeding...");
             // Continue with initialization after recovery
             setTimeout(() => initializeRecorder(), 1000);
           }
@@ -244,14 +308,14 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({
         streamRef.current = mediaStream;
         
         if (videoRef.current) {
-          console.log("🔍 Debug: Video element found:", videoRef.current);
-          console.log("🔍 Debug: Video element readyState:", videoRef.current.readyState);
-          console.log("🔍 Debug: Video element videoWidth:", videoRef.current.videoWidth);
-          console.log("🔍 Debug: Video element videoHeight:", videoRef.current.videoHeight);
+
+
+
+
           
           // Check video tracks
           const videoTracks = mediaStream.getVideoTracks();
-          console.log("🔍 Debug: Video tracks found:", videoTracks.length);
+
           
           if (videoTracks.length === 0) {
             console.error("🔍 Debug: No video tracks found in stream");
@@ -259,46 +323,31 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({
             return;
           }
           
-          // Log detailed track information
-          videoTracks.forEach((track, index) => {
-            console.log(`🔍 Debug: Video track ${index}:`, {
-              id: track.id,
-              label: track.label,
-              enabled: track.enabled,
-              muted: track.muted,
-              readyState: track.readyState,
-              kind: track.kind
-            });
-          });
-          
           // Enable video tracks if disabled
           videoTracks.forEach((track) => {
             if (!track.enabled) {
-              console.log("🔍 Debug: Enabling disabled video track");
+
               track.enabled = true;
             }
           });
           
           // Clear any existing stream
           if (videoRef.current.srcObject) {
-            console.log("🔍 Debug: Clearing existing video stream");
+
             videoRef.current.srcObject = null;
           }
           
           // Set stream to video element
-          console.log("🔍 Debug: Setting stream to video element");
+
           videoRef.current.srcObject = mediaStream;
           
           // Verify stream was set
-          console.log("🔍 Debug: Video srcObject after setting:", videoRef.current.srcObject);
+
           
           // Wait for video metadata to load before playing
           videoRef.current.onloadedmetadata = () => {
-            console.log("🔍 Debug: Video metadata loaded successfully");
-            console.log("🔍 Debug: Video dimensions:", {
-              width: videoRef.current?.videoWidth,
-              height: videoRef.current?.videoHeight
-            });
+
+            
             videoRef.current?.play().catch(err => {
               console.error("Video play error after metadata:", err);
             });
@@ -307,22 +356,17 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({
           // Add error handling for video element
           videoRef.current.onerror = (err) => {
             console.error("🔍 Debug: Video element error:", err);
-            setError("Video element error. Please refresh the page.");
+            setError("Video element error. Please continue to next session.");
           };
           
           // Fallback: Try to play after a short delay if metadata doesn't load
           setTimeout(() => {
             if (videoRef.current) {
-              console.log("🔍 Debug: Fallback check - video readyState:", videoRef.current.readyState);
+
               if (videoRef.current.readyState < 2) {
-                console.log("🔍 Debug: Video not ready, attempting force play");
+
                 videoRef.current.play().catch(err => {
                   console.error("Force video play failed:", err);
-                });
-              } else {
-                console.log("🔍 Debug: Video appears ready, checking dimensions:", {
-                  width: videoRef.current.videoWidth,
-                  height: videoRef.current.videoHeight
                 });
               }
             }
@@ -338,10 +382,10 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({
               
               const checkVideo = () => {
                 if (videoRef.current && videoRef.current.readyState >= 2) {
-                  console.log("🔍 Debug: Video is ready, can start recording");
+
                   resolve();
                 } else {
-                  console.log("🔍 Debug: Video not ready yet, waiting...");
+
                   setTimeout(checkVideo, 100);
                 }
               };
@@ -351,7 +395,7 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({
               
               // Fallback: resolve after 3 seconds anyway
               setTimeout(() => {
-                console.log("🔍 Debug: Video ready timeout, proceeding anyway");
+
                 resolve();
               }, 3000);
             });
@@ -359,7 +403,7 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({
           
           // Wait for video to be ready, then start recording
           waitForVideoReady().then(() => {
-            console.log("🔍 Debug: Starting recording process");
+
             
             // Final stream check before recording
             if (!mediaStream.active) {
@@ -368,10 +412,34 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({
               return;
             }
             
-            // Auto start recording
-            const recorder = new MediaRecorder(mediaStream);
-            console.log("🔍 Debug: MediaRecorder created:", recorder);
-            console.log("🔍 Debug: MediaRecorder state:", recorder.state);
+            // Auto start recording with proper codec
+            // Check supported mimeTypes and use the best available
+            let mimeType = 'video/webm;codecs=vp8,opus';
+            
+            if (!MediaRecorder.isTypeSupported(mimeType)) {
+              // Fallback to vp9
+              mimeType = 'video/webm;codecs=vp9,opus';
+              
+              if (!MediaRecorder.isTypeSupported(mimeType)) {
+                // Fallback to h264 (Safari)
+                mimeType = 'video/mp4;codecs=h264,aac';
+                
+                if (!MediaRecorder.isTypeSupported(mimeType)) {
+                  // Last resort - use default
+                  mimeType = 'video/webm';
+
+                }
+              }
+            }
+            
+
+            
+            const recorder = new MediaRecorder(mediaStream, { 
+              mimeType,
+              videoBitsPerSecond: 2500000 // 2.5 Mbps for good quality
+            });
+
+
             
             recorder.ondataavailable = (e) => {
               if (e.data.size > 0) {
@@ -379,46 +447,30 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({
               }
             };
 
-            recorder.onstop = () => {
-              console.log("🔍 Debug: MediaRecorder stopped");
-              if (isExpectedToEnd.current) {
-                 const blob = new Blob(chunksRef.current, { type: 'video/webm' });
-                 onComplete(blob);
-              } 
-            };
-
             // Add error handling for MediaRecorder
-            recorder.onerror = (event: any) => {
+            recorder.onerror = (event: globalThis.Event) => {
               console.error("🔍 Debug: MediaRecorder error:", event);
-              setError("Recording error occurred. Please restart session.");
+              setError("Recording error occurred. Please continue to next session.");
               // Don't auto-restart during recording - let user handle it
             };
 
             mediaRecorderRef.current = recorder;
             recorder.start();
-            console.log("🔍 Debug: recorder.start() called");
-            console.log("🔍 Debug: MediaRecorder state after start:", recorder.state);
+
+
             
             setIsRecording(true);
-            console.log("🔍 Debug: setIsRecording(true) called");
+
             
             // Start timer immediately after recording starts
             startTimer();
 
             // Simple monitoring - log only, no actions during recording
             const logStreamStatus = () => {
-              if (streamRef.current && mediaRecorderRef.current?.state === 'recording') {
-                const tracks = streamRef.current.getTracks();
-                console.log("🔍 Debug: Stream status check:", {
-                  active: streamRef.current.active,
-                  trackCount: tracks.length,
-                  trackStates: tracks.map(t => ({ 
-                    kind: t.kind, 
-                    enabled: t.enabled, 
-                    state: t.readyState 
-                  }))
-                });
+              if (!streamRef.current || mediaRecorderRef.current?.state !== 'recording') {
+                return;
               }
+              streamRef.current.getTracks();
             };
 
             // Log status every 10 seconds - non-intrusive
@@ -427,24 +479,31 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({
             // Clear logging when recording stops
             recorder.onstop = () => {
               clearInterval(statusLogInterval);
-              console.log("🔍 Debug: MediaRecorder stopped");
+
               if (isExpectedToEnd.current) {
-                 const blob = new Blob(chunksRef.current, { type: 'video/webm' });
-                 onComplete(blob);
+                 const blob = new Blob(chunksRef.current, { type: mimeType });
+                 onCompleteRef.current(blob);
               } 
             };
 
           });
 
         } else {
-          setError("Video element not found. Please refresh page.");
+          setError("Video element not found. Please continue to next session.");
         }
 
-      } catch (err: any) {
+      } catch (err: unknown) {
         let msg = "Recorder initialization error.";
-        if (err.name === 'NotAllowedError') msg = "Access denied. Please check permissions.";
-        if (err.name === 'NotFoundError') msg = "No camera or microphone found.";
-        if (err.name === 'NotReadableError') msg = "Hardware error. Camera might be in use.";
+        const errName =
+          typeof err === 'object' &&
+          err !== null &&
+          'name' in err &&
+          typeof (err as { name?: unknown }).name === 'string'
+            ? (err as { name: string }).name
+            : '';
+        if (errName === 'NotAllowedError') msg = "Access denied. Please check permissions.";
+        if (errName === 'NotFoundError') msg = "No camera or microphone found.";
+        if (errName === 'NotReadableError') msg = "Hardware error. Camera might be in use.";
         setError(msg);
       }
     };
@@ -453,6 +512,7 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({
     const timer = setTimeout(() => {
         initializeRecorder();
     }, 500);
+    const videoElementForCleanup = videoRef.current;
 
     return () => {
       mountedRef.current = false;
@@ -465,65 +525,15 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({
       
       streamRef.current = null;
       
-      if (videoRef.current) {
-        videoRef.current.srcObject = null;
+      if (videoElementForCleanup) {
+        videoElementForCleanup.srcObject = null;
       }
+      
+      // Reset recording state to allow auto-start in next session
+      setIsRecording(false);
+      isInitializingRef.current = false; // Reset initialization flag
     };
-  }, [mediaStream]);
-
-  // Timer function
-  const startTimer = () => {
-        if (timerRef.current) {
-      clearInterval(timerRef.current);
-    }
-    
-    timerRef.current = setInterval(() => {
-      setTimeLeft((prev) => {
-                if (prev <= 1) {
-          handleFinishSession();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  };
-
-  const stopTimer = () => {
-        if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-  };
-
-  const handleFinishSession = () => {
-    console.log("🔍 Debug: handleFinishSession called");
-    console.log("🔍 Debug: Current error state:", error);
-    
-    // If there's an error, don't try to finish normally - just go to next session
-    if (error) {
-      console.log("🔍 Debug: Error detected, forcing session end");
-      stopTimer();
-      // Create empty blob to maintain flow
-      const emptyBlob = new Blob([], { type: 'video/webm' });
-      onComplete(emptyBlob);
-      return;
-    }
-    
-    stopTimer();
-    
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      console.log("🔍 Debug: Stopping media recorder");
-      isExpectedToEnd.current = true;
-      mediaRecorderRef.current.stop();
-    } else {
-      console.log("🔍 Debug: No active recorder to stop");
-      // Still complete the session to maintain flow
-      const emptyBlob = new Blob([], { type: 'video/webm' });
-      onComplete(emptyBlob);
-    }
-  };
-
-  const progress = ((60 - timeLeft) / 60) * 100;
+  }, [mediaStream, prepareStream, sessionNumber, startTimer, stopTimer]);
 
   // --- STANDARD RENDER ---
   return (
@@ -573,6 +583,7 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({
         <div 
           className="relative w-full h-full bg-black rounded-xl overflow-hidden border-2 border-gray-800 shadow-2xl"
           onMouseDown={handleMouseDown}
+          onTouchStart={handleTouchStart}
         >
           {error ? (
             <div className="w-full h-full flex flex-col items-center justify-center text-center p-4 bg-gray-900">
@@ -650,3 +661,4 @@ const SessionRecorder: React.FC<SessionRecorderProps> = ({
 };
 
 export default SessionRecorder;
+

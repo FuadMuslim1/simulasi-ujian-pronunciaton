@@ -1,5 +1,4 @@
 plugins = []
-headers = []
 redirects = []
 
 [functions]
@@ -7,7 +6,7 @@ redirects = []
 [functions."*"]
 
 [build]
-publish = "C:\\Belajar\\GitHub\\FuadMuslim1\\simulasi ujian pronunciation\\simulasi-ujian-pronunciaton\\dist"
+publish = "dist"
 publishOrigin = "ui"
 commandOrigin = "ui"
 command = "npm run build"
@@ -17,6 +16,16 @@ command = "npm run build"
 [build.processing]
 
 [build.processing.css]
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; media-src 'self' blob:; connect-src 'self' https://*.firebaseio.com https://*.googleapis.com https://*.gstatic.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests;"
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    X-XSS-Protection = "1; mode=block"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=*, microphone=*, geolocation=(), payment=(), usb=()"
 
 [build.processing.html]
 
